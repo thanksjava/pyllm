@@ -1,42 +1,46 @@
-import pandas as pd  # <--- 修复点：必须先导入 pandas 才能使用 pd.DataFrame
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import roc_auc_score
+import pandas as pd
 import joblib
 import os
-
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score, f1_score
 
 class RecommendationModel:
     def __init__(self, feature_cols):
         self.feature_cols = feature_cols
+        # 针对样本不均衡（下单成功的少），使用 balanced 权重
         self.model = RandomForestClassifier(
             n_estimators=100,
-            max_depth=8,
             class_weight='balanced',
             random_state=42
         )
 
     def train(self, df: pd.DataFrame):
-        # 确保标签列存在
-        if 'label' not in df.columns:
-            raise ValueError("Dataframe must contain a 'label' column for training.")
+        if df.empty:
+            print("Error: Training dataframe is empty.")
+            return 0
 
         X = df[self.feature_cols]
         y = df['label']
+
+        # 检查是否同时存在 0 和 1 标签
+        if len(np.unique(y)) < 2:
+            print("Warning: Only one class present in label. Random AUC=0.5")
+            return 0.5
 
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.2, random_state=42, stratify=y
         )
 
-        print(f"开始训练模型... 训练集样本量: {len(X_train)}")
+        print(f"Training model with {len(X_train)} samples...")
         self.model.fit(X_train, y_train)
 
-        # 离线评估
-        probs = self.model.predict_proba(X_test)[:, 1]
-        auc = roc_auc_score(y_test, probs)
+        # 离线指标计算
+        y_pred_proba = self.model.predict_proba(X_test)[:, 1]
+        auc = roc_auc_score(y_test, y_pred_proba)
         return auc
 
-    def save(self, path='models/flight_model_v1.joblib'):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        joblib.dump(self.model, path)
-        print(f"✅ 模型成功保存至: {path}")
+    def save(self, model_path='models/flight_rec_model.joblib'):
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        joblib.dump(self.model, model_path)
+        print(f"✅ Model saved at {model_path}")

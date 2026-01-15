@@ -2,7 +2,7 @@
 name = "flight-recommendation"
 version = "0.1.0"
 description = "OTA国际机票下单失败重推荐模型"
-authors = ["chenzhijie"]
+authors = [{name = "Gemini", email = "gemini@example.com"}]
 
 readme = "README.md"
 requires-python = ">=3.11"
