@@ -43,4 +43,4 @@ async def recommend(group: str, origin_flight: dict, candidates: List[dict]):
     else:
         res = service.get_control_recommendations(df_candidates)
 
-    return res[['trip_id', 'total_price', 'rec_type']].to_dict(orient='records')
+    return res[['trip_id', 'total_price', 'rec_type', 'predict_score']].to_dict(orient='records')

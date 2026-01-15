@@ -1,59 +1,81 @@
+import sys
+import os
 import pandas as pd
+
+# 修复导入路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir)
+
 from src.recommender_service import RecommenderService
 
 
 def run_debug_demo():
-    # 1. 初始化推荐服务 (加载已训练的模型)
-    # 确保 models/ 目录下已存在 flight_rec_model_v1.joblib
-    try:
-        service = RecommenderService(model_path='models/flight_rec_model_v1.joblib')
-    except Exception as e:
-        print(f"模型加载失败，请先运行训练脚本: {e}")
+    # 1. 初始化服务
+    model_path = os.path.join(parent_dir, 'models/flight_rec_model_v1.joblib')
+    if not os.path.exists(model_path):
+        print(f"❌ 找不到模型文件: {model_path}，请先运行 main.py 训练模型")
         return
 
-    # 2. 模拟业务场景：用户原本想买 HU7181，但下单失败了
+    service = RecommenderService(model_path=model_path)
+
+    # 2. 模拟下单失败的原始航班 (Base)
     origin_flight = {
-        'total_price': 1500.0,
+        'total_price': 2000.0,
         'go_main_cxr': 'HU',
-        'go_transfer_count': 0
+        'go_transfer_count': 0,
+        'origin_fly_time': 180
     }
 
-    # 3. 模拟实时搜索到的候选航班列表 (Candidate List)
-    # 包含价格、航司、转机次数等关键维度
+    # 3. 模拟实时搜索到的候选航班 (补全缺失字段)
     candidates_data = [
-        {'trip_id': 'flight_001_low_price', 'total_price': 1200.0, 'go_main_cxr': 'CZ', 'go_transfer_count': 1,
-         'adv_book_time': 7, 'resource_type': 'GDS', 'cabin_class_code': 'Y', 'go_fly_time': 300},
-        {'trip_id': 'flight_002_same_cxr', 'total_price': 1600.0, 'go_main_cxr': 'HU', 'go_transfer_count': 0,
-         'adv_book_time': 7, 'resource_type': 'IBE', 'cabin_class_code': 'Y', 'go_fly_time': 180},
-        {'trip_id': 'flight_003_fastest', 'total_price': 2500.0, 'go_main_cxr': 'EK', 'go_transfer_count': 0,
-         'adv_book_time': 7, 'resource_type': 'GDS', 'cabin_class_code': 'Y', 'go_fly_time': 150},
-        {'trip_id': 'flight_004_mid_price', 'total_price': 1550.0, 'go_main_cxr': 'HU', 'go_transfer_count': 1,
-         'adv_book_time': 7, 'resource_type': 'IBE', 'cabin_class_code': 'Y', 'go_fly_time': 240}
+        {
+            'trip_id': 'F001_LowPrice',
+            'total_price': 1500.0,
+            'go_main_cxr': 'CZ',
+            'go_transfer_count': 1,
+            'adv_book_time': 5,
+            'resource_type': 'GDS',
+            'cabin_class_code': 'Y',
+            'go_fly_time': 240
+        },
+        {
+            'trip_id': 'F002_SameAirline',
+            'total_price': 2100.0,
+            'go_main_cxr': 'HU',
+            'go_transfer_count': 0,
+            'adv_book_time': 5,
+            'resource_type': 'IBE',
+            'cabin_class_code': 'Y',
+            'go_fly_time': 180
+        }
     ]
     df_candidates = pd.DataFrame(candidates_data)
 
-    # 注入原失败航班信息作为特征工程的对比基准
+    # 注入基准特征 (用于 FeatureProcessor 计算差异特征)
     df_candidates['origin_price'] = origin_flight['total_price']
     df_candidates['origin_airline'] = origin_flight['go_main_cxr']
     df_candidates['origin_transfer'] = origin_flight['go_transfer_count']
-    df_candidates['origin_fly_time'] = 180  # 假设原航班时长
+    df_candidates['origin_fly_time'] = origin_flight['origin_fly_time']
 
-    # 4. 模拟对照组逻辑 (Control Group: 价格优先)
+    # 4. 对比 A/B Test 结果
     print("\n" + "=" * 20 + " 对照组 (Control: Lowest Price) " + "=" * 20)
-    control_res = service.get_control_recommendations(df_candidates.copy(), top_n=2)
-    print(control_res[['trip_id', 'total_price', 'rec_type']])
+    print(service.get_control_recommendations(df_candidates.copy(), top_n=2)[['trip_id', 'total_price', 'rec_type']])
 
-    # 5. 模拟实验组逻辑 (Test Group: 模型打分)
-    # 需要定义的特征列名
-    feature_cols = [
+    print("\n" + "=" * 20 + " 实验组 (Test: ML Model Score) " + "=" * 20)
+
+    # ⚠️ 特征列表必须与训练时完全一致
+    features = [
         'price_ratio', 'price_diff', 'is_same_airline',
         'transfer_diff', 'total_price', 'adv_book_time',
         'go_transfer_count', 'resource_type_idx'
     ]
 
-    print("\n" + "=" * 20 + " 实验组 (Test: ML Model Score) " + "=" * 20)
-    test_res = service.get_test_recommendations(df_candidates.copy(), feature_cols, top_n=2)
-    print(test_res[['trip_id', 'total_price', 'predict_score', 'rec_type']])
+    try:
+        recommendations = service.get_test_recommendations(df_candidates.copy(), features, top_n=2)
+        print(recommendations[['trip_id', 'total_price', 'predict_score', 'rec_type']])
+    except Exception as e:
+        print(f"❌ 实验组推理失败: {e}")
 
 
 if __name__ == "__main__":
